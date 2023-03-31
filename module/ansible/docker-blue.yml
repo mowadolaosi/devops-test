@@ -1,0 +1,12 @@
+---
+ - hosts: docker_blue
+   become: true
+   tasks:
+   - name: login to dockerhub
+     command: docker login -u -p
+   - name: Stop any containers, sevices and remove images
+     command: docker-compose down --rmi all
+     ignore_errors: yes
+   - name: pull images and Create containers
+     command: docker-compose up
+     ignore_errors: yes

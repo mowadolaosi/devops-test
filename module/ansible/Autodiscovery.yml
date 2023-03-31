@@ -1,0 +1,59 @@
+---
+ - hosts: localhost
+   connection: local
+   user: ubuntu
+   tasks:
+
+   - name: Get IP Address in  Inventory Host File /etc/ansible/hosts
+     set_fact:
+       stage="{{ groups['docker_stage'] | join(',')}}"
+       prod="{{ groups['docker_prod']  | join (',')}}"
+
+  - name: Store Oringinal IP Address of Inventory Host File in a file
+    become: yes 
+     shell: |
+        echo "{{stage}}  ansible_ssh_private_key_file=/home/ubuntu/.ssh/anskey_rsa" > ~/stageIp.yml
+        echo "{{prod}}  ansible_ssh_private_key_file=/home/ubuntu/.ssh/anskey_rsa" > ~/prodIp.yml
+
+   - name: Get list of running new EC2 instances created by ASG
+     amazon.aws.ec2_instance_info:
+       region: eu-west-2
+       filters:
+         "tag:Name": ["PACADPEU1-asg"]
+     register: ec2_instance_info
+
+   - set_fact:
+       msg: "{{ ec2_instance_info | json_query('instances[*].private_ip_address') }}"
+   - debug:
+        var: msg
+     register: ec2_ip
+
+   - name : Store new ec2 by ASG IP in a file
+     become: yes
+     shell: |
+        echo "{{msg}}" > ~/asg-serversIP.yml
+
+   - name: update new ec2 IP in inventory file
+     become: yes
+     shell: |
+         echo  "[PACADPEU1-asg]" > /etc/ansible/hosts;
+         {% for ip in range(ec2_ip['msg']|length)%}
+         echo "{{ec2_ip['msg'][ip]}} ansible_ssh_private_key_file=/home/ubuntu/.ssh/anskey_rsa" >> /etc/ansible/hosts
+         {%endfor%}
+         echo  "[docker_stage]" >> /etc/ansible/hosts
+         cat   /home/ubuntu/stageIp.yml >> /etc/ansible/hosts
+         echo  "[docker_prod]" >> /etc/ansible/hosts
+         cat   /home/ubuntu/prodIp.yml >> /etc/ansible/hosts
+
+   - name: echo
+     shell: |
+        echo "New Ip address in Inventory File"
+        echo "Ready to deploy App to new Ip"
+
+   - name: Deploying Application to New ASG Servers
+     shell: |
+        ansible-playbook -i /etc/ansible/hosts /opt/docker/ASG-container.yml
+     register: deploying
+
+   - debug:
+        msg: "{{ deploying.stdout }}"

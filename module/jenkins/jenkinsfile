@@ -1,0 +1,57 @@
+pipeline{
+    agent any
+    
+  
+    stages{
+        stage('Pull Source Code from GitHub') {
+            steps {
+                git branch: 'main',
+                credentialsId: 'git',
+                url: 'https://github.com/mowadola/modulrdevopstest'
+            }
+        }
+        
+        stage('Code Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                sh "mvn sonar:sonar -Dsonar.java.binaries=target/classes"
+                }
+            }   
+        }
+        
+        stage('Code Quality Approval') {
+            steps {
+                waitForQualityGate abortPipeline: true,
+                credentialsId: 'sonar'
+            }
+        }
+
+            
+        
+        stage('Send Artifacts to Ansible Server') {
+            steps { 
+                sshagent(['jenkins']) {
+                    sh 'scp -o StrictHostKeyChecking=no /var/lib/jenkins/workspace/target/devops-test  ubuntu@18.170.220.13:/~'
+                }
+            }
+        }
+        
+        stage('Trigger docker image builder and green Playbooks') {
+            steps { 
+                sshagent(['jenkins']) {
+                    sh 'ssh -o StrictHostKeyChecking=no ec2-user@18.170.220.13 "ansible-playbook -i /etc/ansible/hosts /opt/docker/docker-image.yml && ansible-playbook -i /etc/ansible/hosts /opt/docker/docker-green.yml"'
+                }
+            }
+        }
+        stage ('Deploy To blue'){
+            input{
+                message "Do you want to proceed ?"
+           }
+            steps { 
+                sshagent(['jenkins']) {
+                    sh 'ssh -o StrictHostKeyChecking=no ec2-user@18.170.220.13 "ansible-playbook -i /etc/ansible/hosts /opt/docker/docker-blue.yml"'
+                }
+            }
+        }
+    }
+}
